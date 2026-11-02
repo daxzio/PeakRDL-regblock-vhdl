@@ -1,6 +1,7 @@
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
-from systemrdl.node import AddrmapNode, RegNode, SignalNode, FieldNode, Node
+from systemrdl.node import AddrmapNode, RegNode, SignalNode, FieldNode, Node, AddressableNode
+from systemrdl.walker import WalkerAction
 
 from .implementation_generator import RBufLogicGenerator
 from ..struct_generator import RDLFlatStructGenerator
@@ -65,6 +66,11 @@ class RBufStorageStructGenerator(RDLFlatStructGenerator):
         super().__init__()
         self.top_node = read_buffering.top_node
 
+    def enter_AddressableComponent(self, node: AddressableNode) -> WalkerAction:
+        if node.external:
+            return WalkerAction.SkipDescendants
+        return WalkerAction.Continue
+
     def get_typdef_name(self, node: 'Node', suffix: str = "") -> str:
         base = node.get_rel_path(
             self.top_node.parent,
@@ -81,7 +87,7 @@ class RBufStorageStructGenerator(RDLFlatStructGenerator):
     def enter_Reg(self, node: RegNode) -> None:
         super().enter_Reg(node)
 
-        if not node.get_property('buffer_reads'):
+        if not node.get_property('buffer_reads') or node.external:
             return
 
         if node.external:

@@ -5,7 +5,7 @@ from systemrdl.walker import WalkerAction
 
 from ..struct_generator import RDLFlatStructGenerator
 from ..identifier_filter import kw_filter as kwf
-from ..utils import clog2, get_vhdl_type_slice_bounds
+from ..utils import ArrayWidth, clog2, get_vhdl_type_slice_bounds
 
 if TYPE_CHECKING:
     from systemrdl.node import Node, SignalNode, AddressableNode, RegfileNode
@@ -170,7 +170,7 @@ class OutputStructGenerator_Hier(HWIFStructGenerator):
 
     def _add_external_block_members(self, node: 'AddressableNode') -> None:
         self.add_member("req")
-        self.add_member("addr", clog2(node.size))
+        self.add_member("addr", ArrayWidth(clog2(node.size)))
         self.add_member("req_is_wr")
         self.add_member("wr_data", self.hwif.ds.cpuif_data_width)
         self.add_member("wr_biten", self.hwif.ds.cpuif_data_width)
@@ -307,10 +307,10 @@ class EnumGenerator:
         if max_value.bit_length() == 1:
             datatype = "std_logic := '{0}'"
         else:
-            datatype = f'std_logic_vector({max_value.bit_length() - 1} downto 0) := {max_value.bit_length()}x"{{0}}"'
+            datatype = f'std_logic_vector({max_value.bit_length() - 1} downto 0) := {max_value.bit_length()}x"{{0:X}}"'
 
         for enum_member in user_enum:
             constname = kwf(f"{prefix}.{enum_member.name}")
-            lines.append(f"constant {constname} : {datatype.format(enum_member.value,'x')};")
+            lines.append(f"constant {constname} : {datatype.format(enum_member.value)};")
 
         return "\n".join(lines)

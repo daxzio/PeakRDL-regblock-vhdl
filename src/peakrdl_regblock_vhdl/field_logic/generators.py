@@ -257,7 +257,7 @@ class FieldLogicGenerator(RDLForLoopGenerator):
                         "Field has multiple conflicting properties that unconditionally set its state:\n"
                         f"  * {conditional.unconditional_explanation}\n"
                         f"  * {unconditional.unconditional_explanation}",
-                        node.inst.inst_src_ref
+                        node.inst_src_ref
                     )
                 unconditional = conditional
             else:
@@ -404,6 +404,7 @@ class FieldLogicGenerator(RDLForLoopGenerator):
         req_reset = VhdlInt.zeros(n_subwords)
 
         context = {
+            'node': node,
             "has_sw_writable": node.has_sw_writable,
             "has_sw_readable": node.has_sw_readable,
             "prefix": prefix,
@@ -431,6 +432,7 @@ class FieldLogicGenerator(RDLForLoopGenerator):
             retime = self.ds.retime_external_addrmap
 
         context = {
+            'node': node,
             "prefix": prefix,
             "strb": strb,
             "addr_width": addr_width,

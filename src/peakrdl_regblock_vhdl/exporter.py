@@ -1,7 +1,9 @@
 import os
+import shutil
 from typing import TYPE_CHECKING, Union, Any, Type, Optional, Set, List
 from collections import OrderedDict
 
+import importlib_resources as resources
 import jinja2 as jj
 from systemrdl.node import AddrmapNode, RootNode
 
@@ -119,6 +121,15 @@ class RegblockExporter:
             If overriden to True, default reset is active-low instead of active-high.
         default_reset_async: bool
             If overriden to True, default reset is asynchronous instead of synchronous.
+        err_if_bad_addr: bool
+            If overriden to True: If the address is decoded incorrectly, the CPUIF response
+            signal shows an error. For example: APB.PSLVERR = 1'b1, AXI4LITE.*RESP = 2'b10.
+        err_if_bad_rw: bool
+            If overriden to True: If an illegal access is performed to a read-only or write-only
+            register, the CPUIF response signal shows an error. For example: APB.PSLVERR = 1'b1,
+            AXI4LITE.*RESP = 2'b10.
+        copy_utils_pkg: bool
+            If overridden to True, copy the reg_utils.vhd package into the output directory.
         """
         # If it is the root node, skip to top addrmap
         if isinstance(node, RootNode):
@@ -144,15 +155,12 @@ class RegblockExporter:
         # Construct exporter components
         self.cpuif = cpuif_cls(self)
         self.hwif = Hwif(self, hwif_report_file=hwif_report_file)
+        self.readback = Readback(self)
         self.address_decode = AddressDecode(self)
         self.field_logic = FieldLogic(self)
         self.write_buffering = WriteBuffering(self)
         self.read_buffering = ReadBuffering(self)
         self.dereferencer = Dereferencer(self)
-        # Construct readback last.
-        # Readback has the capability to disable retiming if the fanin is tiny.
-        # This is done at initialization and requires knowledge of the rest of the design.
-        self.readback = Readback(self)
         ext_write_acks = ExternalWriteAckGenerator(self)
         ext_read_acks = ExternalReadAckGenerator(self)
         parity = ParityErrorReduceGenerator(self)
@@ -164,13 +172,18 @@ class RegblockExporter:
         context = {
             "cpuif": self.cpuif,
             "hwif": self.hwif,
+            "module_has_parameters": self.module_has_parameters,
+            "get_module_parameter_list": self.get_module_parameter_list,
+            "get_module_port_list": self.get_module_port_list,
             "write_buffering": self.write_buffering,
             "read_buffering": self.read_buffering,
             "get_resetsignal": self.dereferencer.get_resetsignal,
             "default_resetsignal_name": self.dereferencer.default_resetsignal_name,
             "address_decode": self.address_decode,
             "field_logic": self.field_logic,
-            "readback": self.readback,
+            "readback_implementation": self.readback.get_implementation(),
+            "low_addr_width": self.readback.low_addr_width,
+            "high_addr_width": self.readback.high_addr_width,
             "ext_write_acks": ext_write_acks,
             "ext_read_acks": ext_read_acks,
             "parity": parity,
@@ -191,8 +204,58 @@ class RegblockExporter:
         stream = template.stream(context)
         stream.dump(module_file_path)
 
+        if self.ds.copy_utils_pkg:
+            with resources.as_file(
+                resources.files('peakrdl_regblock_vhdl.hdl_src').joinpath('reg_utils.vhd')
+            ) as src_pkg:
+                shutil.copyfile(
+                    src_pkg,
+                    os.path.join(output_dir, "reg_utils.vhd")
+                )
+
         if hwif_report_file:
             hwif_report_file.close()
+
+    def module_has_parameters(self) -> bool:
+        return bool(self.cpuif.parameters)
+
+    def get_module_parameter_list(self) -> str:
+        return ";\n".join(self.cpuif.parameters)
+
+    def get_module_port_list(self) -> str:
+        groups = []
+
+        # Main clock & reset
+        clkrst = [
+            "clk : in std_logic",
+            f"{self.dereferencer.default_resetsignal_name} : in std_logic"
+        ]
+        groups.append(";\n".join(clkrst))
+
+        # Signals that were declared outside of the hierarchy of the addrmap
+        # being exported
+        out_of_hier_signals = []
+        for signal in self.ds.out_of_hier_signals.values():
+            if signal.width == 1:
+                out_of_hier_signals.append(f"{kwf(signal.inst_name)} : in std_logic")
+            else:
+                out_of_hier_signals.append(f"{kwf(signal.inst_name)} : in std_logic_vector({signal.width - 1} downto 0)")
+        if out_of_hier_signals:
+            groups.append(";\n".join(out_of_hier_signals))
+
+        # Parity check error output
+        if self.ds.has_paritycheck:
+            groups.append("parity_error : out std_logic")
+
+        # CPU interface ports
+        groups.append(self.cpuif.port_declaration)
+
+        if self.hwif.has_input_struct or self.hwif.has_output_struct:
+            groups.append(self.hwif.port_declaration)
+
+        return ";\n\n".join(groups)
+
+
 
 
 class DesignState:
@@ -225,6 +288,13 @@ class DesignState:
         self.default_reset_activelow = kwargs.pop("default_reset_activelow", False) # type: bool
         self.default_reset_async = kwargs.pop("default_reset_async", False) # type: bool
 
+        # Generating a cpuif error
+        self.err_if_bad_addr = kwargs.pop("err_if_bad_addr", False) # type: bool
+        self.err_if_bad_rw = kwargs.pop("err_if_bad_rw", False) # type: bool
+
+        # General exporter options
+        self.copy_utils_pkg = kwargs.pop("copy_utils_pkg", False) # type: bool
+
         #------------------------
         # Info about the design
         #------------------------
@@ -255,9 +325,13 @@ class DesignState:
             # Assume 32-bits
             msg.warning(
                 "Addrmap being exported only contains external components. Unable to infer the CPUIF bus width. Assuming 32-bits.",
-                self.top_node.inst.def_src_ref
+                self.top_node.def_src_ref
             )
             self.cpuif_data_width = 32
+
+            # Also, to avoid silly edge cases, disable read fanin retiming since
+            # it has little benefit anyways
+            self.retime_read_fanin = False
 
         #------------------------
         # Min address width encloses the total size AND at least 1 useful address bit
@@ -267,6 +341,15 @@ class DesignState:
             if user_addr_width < self.addr_width:
                 msg.fatal(f"User-specified address width shall be greater than or equal to {self.addr_width}.")
             self.addr_width = user_addr_width
+
+        if self.retime_read_fanin:
+            # Check if address width is sufficient to even bother with read fanin retiming
+            data_width_bytes = self.cpuif_data_width // 8
+            unused_low_addr_bits = clog2(data_width_bytes)
+            relevant_addr_width = self.addr_width - unused_low_addr_bits
+            if relevant_addr_width < 2:
+                # Unable to partition the address space. Disable retiming
+                self.retime_read_fanin = False
 
     @property
     def min_read_latency(self) -> int:

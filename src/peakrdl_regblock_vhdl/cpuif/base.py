@@ -43,10 +43,14 @@ class CpuifBase:
         raise NotImplementedError()
 
     @property
+    def package_library(self) -> Union[str, None]:
+        return None
+
+    @property
     def parameters(self) -> List[str]:
         """
-        Optional list of additional parameters this CPU interface provides to
-        the module's definition
+        Optional list of additional parameter declarations this CPU interface
+        provides to the module's definition
         """
         return []
 

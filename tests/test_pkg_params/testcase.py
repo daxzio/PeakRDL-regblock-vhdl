@@ -1,18 +1,20 @@
 from parameterized import parameterized_class
 
 from ..lib.sim_testcase import SimTestCase
-from ..lib.test_params import get_permutations
+from ..lib.test_params import get_permutation_class_name, get_permutations
 
 PARAMS = get_permutations({
     "n_regs" : [1, 2],
     "regwidth" : [8, 16],
     "name" : ["hello", "world"],
+    "swacc" : [True, False],
 })
-@parameterized_class(PARAMS)
-class TestRetimedFanin(SimTestCase):
+@parameterized_class(PARAMS, class_name_func=get_permutation_class_name)
+class TestPkgParams(SimTestCase):
     n_regs = 20
     regwidth = 32
     name = "xyz"
+    swacc = False
 
     @classmethod
     def setUpClass(cls):
@@ -20,6 +22,7 @@ class TestRetimedFanin(SimTestCase):
             "N_REGS": cls.n_regs,
             "REGWIDTH": cls.regwidth,
             "NAME": f'"{cls.name}"',
+            "SWACC": cls.swacc,
         }
         super().setUpClass()
 

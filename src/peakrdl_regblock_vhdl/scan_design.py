@@ -53,7 +53,7 @@ class DesignScanner(RDLListener):
         if self.top_node.get_property('bridge'):
             self.msg.error(
                 "Regblock generator does not support exporting bridge address maps",
-                self.top_node.inst.property_src_ref.get('bridge', self.top_node.inst.inst_src_ref)
+                self.top_node.property_src_ref.get('bridge', self.top_node.inst_src_ref),
             )
 
         RDLWalker().walk(self.top_node, self)
@@ -78,10 +78,6 @@ class DesignScanner(RDLListener):
                 else:
                     self.ds.in_hier_signal_paths.add(path)
 
-            if prop_name == "encode":
-                if value not in self.ds.user_enums:
-                    self.ds.user_enums.append(value)
-
         return WalkerAction.Continue
 
     def enter_AddressableComponent(self, node: 'AddressableNode') -> None:
@@ -95,8 +91,10 @@ class DesignScanner(RDLListener):
         accesswidth = node.get_property('accesswidth')
         self.ds.cpuif_data_width = max(self.ds.cpuif_data_width, accesswidth)
 
-        self.ds.has_buffered_write_regs = self.ds.has_buffered_write_regs or bool(node.get_property('buffer_writes'))
-        self.ds.has_buffered_read_regs = self.ds.has_buffered_read_regs or bool(node.get_property('buffer_reads'))
+        if node.get_property('buffer_writes') and not node.external:
+            self.ds.has_buffered_write_regs = True
+        if node.get_property('buffer_reads') and not node.external:
+            self.ds.has_buffered_read_regs = True
 
     def enter_Signal(self, node: 'SignalNode') -> None:
         if node.get_property('field_reset'):
@@ -115,5 +113,9 @@ class DesignScanner(RDLListener):
                     f"Field '{node.inst_name}' includes parity check logic, but "
                     "its reset value was not defined. Will result in an undefined "
                     "value on the module's 'parity_error' output.",
-                    self.top_node.inst.property_src_ref.get('paritycheck', self.top_node.inst.inst_src_ref)
+                    self.top_node.property_src_ref.get('paritycheck', self.top_node.inst_src_ref)
                 )
+
+        encode = node.get_property("encode")
+        if encode and encode not in self.ds.user_enums:
+            self.ds.user_enums.append(encode)

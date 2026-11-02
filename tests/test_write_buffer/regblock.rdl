@@ -102,5 +102,45 @@ addrmap top {
     } g6_modcount;
     g6_modcount.c->incr = g6_r1.f1->swmod;
 
+    //--------------------------------------------------------------------------
+    // external components
+    //--------------------------------------------------------------------------
 
+    // ensure write buffering logic is not generated for external components
+    external myreg ext_reg1;
+    external regfile {
+        myreg reg1;
+    } ext_block;
+
+    //--------------------------------------------------------------------------
+    // arrays
+    //--------------------------------------------------------------------------
+
+    regfile {
+      reg {
+        regwidth = 128;
+        buffer_writes;
+        default sw = rw;
+        default hw = r;
+        field {} f1[16] = 0;
+        field {} f2[32] = 0;
+        field {} f3[64] = 0;
+        field {} f4[1] = 0;
+      } fields;
+    } regfile_array[2];
+
+    //--------------------------------------------------------------------------
+    // signed/fixed-point
+    //--------------------------------------------------------------------------
+
+    reg {
+        regwidth = 32;
+        buffer_writes;
+        default sw = rw;
+        default hw = r;
+        field {is_signed; } f1[8] = 111;
+        field {fracwidth=1; } f2[8] = 222;
+        field {is_signed; } f3[1] = 0;
+        field {fracwidth=1; } f4[1] = 1;
+    } reg_fp;
 };

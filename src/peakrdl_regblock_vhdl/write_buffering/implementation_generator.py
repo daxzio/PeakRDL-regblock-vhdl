@@ -1,8 +1,8 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from collections import namedtuple
 
-from systemrdl.component import Reg
-from systemrdl.node import RegNode
+from systemrdl.node import RegNode, AddressableNode
+from systemrdl.walker import WalkerAction
 
 from ..forloop_generator import RDLForLoopGenerator
 
@@ -12,18 +12,22 @@ if TYPE_CHECKING:
 class WBufLogicGenerator(RDLForLoopGenerator):
     loop_type = "generate"
     def __init__(self, wbuf: 'WriteBuffering') -> None:
-        super().__init__()
+        super().__init__("gen_wbuf_logic_")
         self.wbuf = wbuf
         self.exp = wbuf.exp
         self.template = self.exp.jj_env.get_template(
             "write_buffering/template.vhd"
         )
 
+    def enter_AddressableComponent(self, node: AddressableNode) -> Optional[WalkerAction]:
+        if node.external:
+            return WalkerAction.SkipDescendants
+        return super().enter_AddressableComponent(node)
+
     def enter_Reg(self, node: 'RegNode') -> None:
         super().enter_Reg(node)
-        assert isinstance(node.inst, Reg)
 
-        if not node.get_property('buffer_writes'):
+        if not node.get_property('buffer_writes') or node.external:
             return
 
         if node.external:
@@ -38,7 +42,7 @@ class WBufLogicGenerator(RDLForLoopGenerator):
             n_subwords = regwidth // accesswidth
             for i in range(n_subwords):
                 strobe = strb_prefix + f"({i})"
-                if node.inst.is_msb0_order:
+                if node.is_msb0_order:
                     bslice = f"({regwidth - (accesswidth * i) - 1} downto {regwidth - (accesswidth * (i+1))})"
                 else:
                     bslice = f"({(accesswidth * (i + 1)) - 1} downto {accesswidth * i})"

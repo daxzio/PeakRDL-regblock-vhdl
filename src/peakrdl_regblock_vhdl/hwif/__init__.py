@@ -51,16 +51,18 @@ class Hwif:
 
     def get_extra_package_params(self) -> str:
         lines = [""]
-
-        for param in self.top_node.inst.parameters:
-            value = param.get_value()
-            if isinstance(value, int):
+        for name, value in self.top_node.parameters.items():
+            if isinstance(value, bool):
                 lines.append(
-                    f"constant {param.name} : integer := {value};"
+                    f"constant {name} : boolean := {value};"
+                )
+            elif isinstance(value, int):
+                lines.append(
+                    f"constant {name} : integer := {value};"
                 )
             elif isinstance(value, str):
                 lines.append(
-                    f"constant {param.name} : string := {value};"
+                    f"constant {name} : string := {value};"
                 )
 
         return "\n".join(lines)
@@ -107,10 +109,6 @@ class Hwif:
         """
         Returns the declaration string for all I/O ports in the hwif group
         """
-
-        # Assume get_package_declaration() is always called prior to this
-        assert self.has_input_struct is not None
-        assert self.has_output_struct is not None
 
         lines = []
         if self.has_input_struct:
